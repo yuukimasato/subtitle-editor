@@ -17,7 +17,9 @@ function clampEnd(start, end) {
 }
 
 // deps.readClipboardText 可注入（单测用）；默认读系统剪贴板
+// deps.journal 编辑日志（js/journal.js）：commit 时记录字段级 diff 与上下文，可选
 export function createActions(store, deps = {}) {
+  const journal = deps.journal ?? null;
   const history = new History();
   let clipboard = []; // 内部行剪贴板：{start, end, text, meta?}
 
@@ -35,11 +37,12 @@ export function createActions(store, deps = {}) {
 
   // coalesceKey：相同键的连续提交合并为一个撤销步骤（音频盒自动提交用）。
   // 合并命中时快照会被 push 丢弃，先判断再克隆，省掉自动提交拖拽中每帧的整表深拷贝。
-  function commit(next, extra = {}, coalesceKey = null) {
-    const snapshot = history.wouldCoalesce(coalesceKey)
-      ? store.state.cues
-      : structuredClone(store.state.cues);
+  // command：触发本次提交的动作名，透传给编辑日志（journal.record）。
+  function commit(next, extra = {}, coalesceKey = null, command = null) {
+    const before = store.state.cues;
+    const snapshot = history.wouldCoalesce(coalesceKey) ? before : structuredClone(before);
     history.push(snapshot, { coalesceKey });
+    journal?.record({ command, coalesceKey, before, after: next });
     store.patch({ cues: next, dirty: history.isDirty, ...pruneSelection(next), ...extra });
     store.emit('selection');
     store.emit('history');
@@ -206,7 +209,7 @@ export function createActions(store, deps = {}) {
         next.end = end;
       }
       if (next.start === cue.start && next.end === cue.end && next.text === cue.text) return false;
-      commit(sortCues(store.state.cues.map((c) => (c.id === cue.id ? next : c))));
+      commit(sortCues(store.state.cues.map((c) => (c.id === cue.id ? next : c))), {}, null, 'updateCue');
       return true;
     },
 
@@ -223,7 +226,7 @@ export function createActions(store, deps = {}) {
         return updated;
       });
       if (!changed) return false;
-      commit(next);
+      commit(next, {}, null, 'updateCueStyle');
       return true;
     },
 
@@ -237,6 +240,7 @@ export function createActions(store, deps = {}) {
         sortCues(store.state.cues.map((c) => (c.id === cue.id ? { ...c, start, end } : c))),
         {},
         coalesceKey,
+        'updateCueTimes',
       );
       return true;
     },
@@ -262,7 +266,7 @@ export function createActions(store, deps = {}) {
         return { ...cue, start, end };
       });
       if (!changed) return false;
-      commit(sortCues(next), {}, coalesceKey);
+      commit(sortCues(next), {}, coalesceKey, 'updateCueTimesBulk');
       return true;
     },
 
@@ -277,7 +281,7 @@ export function createActions(store, deps = {}) {
         end = Math.max(start + MIN_LEN, end + delta);
       }
       if (start === cue.start && end === cue.end) return false;
-      commit(sortCues(store.state.cues.map((c) => (c.id === cue.id ? { ...c, start, end } : c))));
+      commit(sortCues(store.state.cues.map((c) => (c.id === cue.id ? { ...c, start, end } : c))), {}, null, 'nudge');
       return true;
     },
 
@@ -288,7 +292,7 @@ export function createActions(store, deps = {}) {
       let end = t + 2;
       if (next && next.start < end) end = Math.max(t + MIN_LEN, next.start);
       const cue = makeNewCue(store.state.subtitleFormat, store.state.subDoc, t, end, '');
-      commit(sortCues([...cues, cue]));
+      commit(sortCues([...cues, cue]), {}, null, 'insertAtTime');
       setSelection([cue.id]);
       return cue;
     },
@@ -320,7 +324,7 @@ export function createActions(store, deps = {}) {
       const next = [...cues];
       next.splice(at, 0, cue);
       // 稳定排序：相同时间键保持插入的相对位置；coalesceKey 供「提交并新建」等多步操作合并撤销
-      commit(sortCues(next), {}, coalesceKey);
+      commit(sortCues(next), {}, coalesceKey, 'insertRelativeTo');
       setSelection([cue.id]);
       return cue;
     },
@@ -346,7 +350,7 @@ export function createActions(store, deps = {}) {
           next.push(copy);
         }
       });
-      commit(sortCues(next));
+      commit(sortCues(next), {}, null, 'duplicateCues');
       setSelection(cues.filter((c) => wanted.has(c.id)).map((c) => clones.get(c.id).id));
       return true;
     },
@@ -357,7 +361,7 @@ export function createActions(store, deps = {}) {
       const cues = store.state.cues;
       const firstIdx = cues.findIndex((c) => wanted.has(c.id));
       const rest = cues.filter((c) => !wanted.has(c.id));
-      commit(rest, { editingId: null });
+      commit(rest, { editingId: null }, null, 'removeCues');
       const fallback = rest[Math.min(Math.max(firstIdx, 0), rest.length - 1)] ?? null;
       setSelection(fallback ? [fallback.id] : []);
       return true;
@@ -395,7 +399,7 @@ export function createActions(store, deps = {}) {
         ...store.state.cues.filter((c) => c.id !== cue.id),
         head,
         tail,
-      ]));
+      ]), {}, null, 'splitCue');
       setSelection([tail.id]);
       return true;
     },
@@ -413,7 +417,7 @@ export function createActions(store, deps = {}) {
         text: `${cue.text}${cue.text && next.text ? '\n' : ''}${next.text}`,
       };
       if (cue.meta) merged.meta = { ...cue.meta, parts: [...cue.meta.parts] };
-      commit(sortCues(cues.filter((c) => c.id !== next.id).map((c) => (c.id === cue.id ? merged : c))));
+      commit(sortCues(cues.filter((c) => c.id !== next.id).map((c) => (c.id === cue.id ? merged : c))), {}, null, 'mergeWithNext');
       return true;
     },
 
@@ -482,7 +486,7 @@ export function createActions(store, deps = {}) {
       else at = cues.length;
       const next = [...cues];
       next.splice(at, 0, ...inserts);
-      commit(sortCues(next));
+      commit(sortCues(next), {}, null, 'pasteCues');
       setSelection(inserts.map((c) => c.id));
       return inserts;
     },
@@ -541,7 +545,7 @@ export function createActions(store, deps = {}) {
       if (!updated.size && !additions.length) return skipped ? { ok: true, skipped } : false;
       const next = [...cues];
       if (additions.length) next.splice(from + targets.length, 0, ...additions);
-      commit(sortCues(next.map((c) => updated.get(c.id) ?? c)));
+      commit(sortCues(next.map((c) => updated.get(c.id) ?? c)), {}, null, 'pasteSpecial');
       if (additions.length) setSelection(additions.map((c) => c.id));
       return { ok: true, skipped };
     },

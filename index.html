@@ -30,6 +30,7 @@
       <button class="btn" type="button" data-export="ass">导出 ASS</button>
       <span class="sep"></span>
       <button id="btn-help" class="btn btn-ghost" type="button">快捷键</button>
+      <button id="btn-journal" class="btn btn-ghost" type="button">日志</button>
       <button id="btn-about" class="btn btn-ghost" type="button">关于</button>
     </div>
   </header>
@@ -179,6 +180,25 @@
       <li>JASSUB 2.5.14 —— JS: MIT；WASM 内含 libass 等编译库（宽松许可栈，详见 NOTICE）</li>
     </ul>
     <form method="dialog"><button class="btn btn-primary">关闭</button></form>
+  </dialog>
+
+  <dialog id="journal-dialog">
+    <h2>编辑日志</h2>
+    <p class="dialog-hint">
+      记录手动编辑行为及其上下文（时间轴前后值、行间留白、局部音频特征），纯本地存储，
+      用于「什么样的音频特征下做了什么调整」的偏好学习与识别质量评估。本工具不联网；
+      导出的 <code>.journal.jsonl</code> 可交由上层流水线的反馈学习摄取，是否提供完全由你决定。
+      导出字幕时会自动随附日志文件。
+    </p>
+    <div class="dialog-actions journal-actions">
+      <label><input type="checkbox" id="journal-enabled"> 记录编辑日志</label>
+      <span id="journal-stats" class="dialog-hint"></span>
+    </div>
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" type="button" id="btn-journal-export">导出日志</button>
+      <button class="btn" type="button" id="btn-journal-clear">清空日志</button>
+      <button class="btn btn-primary" value="close">关闭</button>
+    </form>
   </dialog>
 
   <script type="module" src="js/main.js"></script>

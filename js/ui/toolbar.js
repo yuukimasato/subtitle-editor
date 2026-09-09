@@ -5,7 +5,7 @@ import { showToast } from './toast.js';
 const MEDIA_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|mp3|wav|flac|m4a|ogg|opus)$/i;
 const SUB_EXT = /\.(srt|vtt|ass|ssa)$/i;
 
-export function createToolbar({ store, actions, player, waveform, assPreview, draft, flushEdits }) {
+export function createToolbar({ store, actions, player, waveform, assPreview, draft, journal, flushEdits }) {
   const mediaInput = document.getElementById('media-input');
   const subtitleInput = document.getElementById('subtitle-input');
   const buttons = {
@@ -14,6 +14,7 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     undo: document.getElementById('btn-undo'),
     redo: document.getElementById('btn-redo'),
     help: document.getElementById('btn-help'),
+    journal: document.getElementById('btn-journal'),
     about: document.getElementById('btn-about'),
   };
   const exportButtons = new Map(
@@ -21,6 +22,9 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
   );
   const helpDialog = document.getElementById('help-dialog');
   const aboutDialog = document.getElementById('about-dialog');
+  const journalDialog = document.getElementById('journal-dialog');
+  const journalEnabledInput = document.getElementById('journal-enabled');
+  const journalStatsEl = document.getElementById('journal-stats');
 
   buttons.openMedia.addEventListener('click', () => mediaInput.click());
   buttons.openSubtitle.addEventListener('click', () => subtitleInput.click());
@@ -51,6 +55,43 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
   exportButtons.forEach((btn, format) => {
     btn.addEventListener('click', () => download(format));
   });
+
+  // ---------- 编辑日志（本地行为记录，见 js/journal.js） ----------
+  function syncJournalUi() {
+    if (!journal) return;
+    const stats = journal.stats();
+    journalEnabledInput.checked = stats.enabled;
+    journalStatsEl.textContent = `已记录 ${stats.events} 条事件${stats.overflow ? '（已达上限，请导出或清空）' : ''}`;
+  }
+  if (journal) {
+    buttons.journal.addEventListener('click', () => {
+      syncJournalUi();
+      journalDialog.showModal();
+    });
+    journalEnabledInput.addEventListener('change', () => {
+      journal.setEnabled(journalEnabledInput.checked);
+      syncJournalUi();
+    });
+    document.getElementById('btn-journal-export').addEventListener('click', () => {
+      const text = journal.exportText();
+      if (!text) {
+        showToast('当前文件还没有可导出的日志', 'error');
+        return;
+      }
+      const base = (store.state.subtitleName || store.state.mediaName || 'subtitles').replace(/\.[^.]+$/, '');
+      downloadTextFile(`${base}.journal.jsonl`, text, 'application/x-ndjson');
+      showToast('编辑日志已导出');
+      syncJournalUi();
+    });
+    document.getElementById('btn-journal-clear').addEventListener('click', () => {
+      if (confirm('确定清空当前文件的编辑日志？清空后不可恢复。')) {
+        journal.clear();
+        syncJournalUi();
+      }
+    });
+  } else {
+    buttons.journal.hidden = true;
+  }
 
   // ---------- 文件 ----------
   async function openMediaFile(file) {
@@ -141,7 +182,25 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     const draftName = s.subtitleName || s.mediaName; // markExported 会改写 subtitleName，先取草稿键名
     actions.markExported(fmt, `${base}.${fmt}`);
     draft.discard(draftName, s.mediaName); // 导出成功即落盘，草稿完成使命
-    showToast(`已导出 ${base}.${fmt}`);
+    // 编辑日志搭车导出（账本语义：导出不清空队列，重复导出由摄取端去重）
+    let journalNote = '';
+    const journalText = journal?.exportText?.();
+    if (journalText) {
+      downloadTextFile(`${base}.journal.jsonl`, journalText, 'application/x-ndjson');
+      journalNote = ' 及编辑日志';
+      if (journal.stats().overflow) journalNote += '（日志已达上限，建议尽快留档）';
+    }
+    showToast(`已导出 ${base}.${fmt}${journalNote}`);
+  }
+
+  function downloadTextFile(filename, text, mime = 'text/plain;charset=utf-8') {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return {

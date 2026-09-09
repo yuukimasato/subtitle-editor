@@ -1,8 +1,9 @@
 {
   "apiVersion": 1,
-  "note": "window.agent 契约冻结（js/agent-api.js）。变更须同步更新本文件并在 docs 记录。",
+  "note": "window.agent 契约冻结（js/agent-api.js）。变更须同步更新本文件并在 docs 记录。2026-09-10：P1 追加 getJournalText 与 journal 快照段（编辑日志只读出口，追加式变更）。",
   "apiSurface": [
     "act",
+    "getJournalText",
     "getPeaks",
     "getSnapshot",
     "loadMedia",
@@ -25,6 +26,10 @@
     "history.canRedo",
     "history.canUndo",
     "history.depth",
+    "journal",
+    "journal.enabled",
+    "journal.events",
+    "journal.overflow",
     "media",
     "media.currentTime",
     "media.duration",

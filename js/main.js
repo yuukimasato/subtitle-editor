@@ -13,6 +13,7 @@ import { createContextMenu } from './ui/context-menu.js';
 import { createToolbar } from './ui/toolbar.js';
 import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
+import { createJournal, computeAudioContext } from './journal.js';
 import { serializeSubtitle } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
@@ -26,7 +27,20 @@ const AGENT_QUERY_FLAG = 'agent';
 const agentMode = new URLSearchParams(location.search).has(AGENT_QUERY_FLAG);
 
 const store = createStore();
-const actions = createActions(store);
+
+// 编辑日志：What 层音频特征由波形峰值派生（锚点前后各 2 秒窗口），waveform 稍后装配、惰性引用
+const journal = createJournal(store, {
+  namespace: agentMode ? AGENT_QUERY_FLAG : '',
+  audioFeatures: (t0, t1) => {
+    if (!waveform?.getPeaksData) return null;
+    const anchor = t1 ?? t0;
+    const data = waveform.getPeaksData(Math.max(0, t0 - 2), anchor + 2);
+    if (!data) return null;
+    return computeAudioContext(data.samples, data.rate, data.start, t0, anchor);
+  },
+});
+
+const actions = createActions(store, { journal });
 
 const player = createPlayer({
   store,
@@ -118,6 +132,7 @@ const toolbar = createToolbar({
   waveform,
   assPreview,
   draft,
+  journal,
   flushEdits,
 });
 
@@ -149,6 +164,7 @@ store.on('mediaLoaded', (s) => {
 window.addEventListener('beforeunload', (e) => {
   flushEdits();
   draft.saveNow();
+  journal.flush();
   if (store.state.dirty) {
     e.preventDefault();
     e.returnValue = '';
@@ -184,12 +200,13 @@ autoloadFromQuery();
 
 // window.agent：版本化契约（见 js/agent-api.js 与 .smoke/agent-contract.baseline.json）；
 // 调试句柄 __editor 保留（非契约，控制台排查用）
-window.__editor = { store, actions, player, waveform, timing, audioCommands, assPreview };
+window.__editor = { store, actions, player, waveform, timing, audioCommands, assPreview, journal };
 window.agent = createAgentApi({
   store,
   actions,
   player,
   waveform,
+  journal,
   loadMedia: (url) => loadFromUrl(url, (f) => toolbar.openMediaFile(f)),
   loadSubs: (url) => loadFromUrl(url, (f) => toolbar.openSubtitleFile(f)),
   saveDraft: () => draft.saveNow(true),

@@ -43,10 +43,12 @@ const COALESCE_ACTIONS = new Set(['updateCueTimes', 'updateCueTimesBulk', 'inser
 //   player           播放器（读当前时间）
 //   loadMedia(url) / loadSubs(url)   固化的 fetch 加载路径（main.js 与 autoload 共用）
 //   saveDraft()      显式草稿落盘（agent 命名空间）
+//   journal          编辑日志（js/journal.js，可选）：快照暴露统计，getJournalText 只读导出；
+//                    act() 执行期间事件 actor 自动标记为 agent（人机数据分流）
 //   canvasFactory()  可注入（单测）；默认 document.createElement('canvas')
 // }
 export function createAgentApi(deps) {
-  const { store, actions, waveform, player, loadMedia, loadSubs, saveDraft, canvasFactory } = deps;
+  const { store, actions, waveform, player, loadMedia, loadSubs, saveDraft, journal, canvasFactory } = deps;
 
   function getSnapshot() {
     const s = store.state;
@@ -81,6 +83,9 @@ export function createAgentApi(deps) {
         canRedo: !!actions.history.canRedo,
         depth: actions.history.past.length, // Agent 批量写操作后核对 coalesce 生效
       },
+      journal: journal
+        ? journal.stats()
+        : { enabled: false, events: 0, overflow: false },
     };
   }
 
@@ -162,12 +167,21 @@ export function createAgentApi(deps) {
     if (opts.coalesceKey && COALESCE_ACTIONS.has(name)) {
       callArgs.push({ coalesceKey: opts.coalesceKey });
     }
+    // 编辑日志的 actor 分流：Agent 会话期间的写操作不混入人工行为数据
+    journal?.setActor?.('agent');
     try {
       const result = await fn(...callArgs);
       return { ok: true, result: result === undefined ? null : result };
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
+    } finally {
+      journal?.setActor?.('human');
     }
+  }
+
+  // 只读导出：当前文件的编辑日志 NDJSON（无事件时 null）
+  function getJournalText() {
+    return journal?.exportText?.() ?? null;
   }
 
   return {
@@ -178,6 +192,7 @@ export function createAgentApi(deps) {
     loadMedia,
     loadSubs,
     act,
+    getJournalText,
     saveDraft,
   };
 }
