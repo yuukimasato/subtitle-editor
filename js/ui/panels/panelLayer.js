@@ -13,9 +13,8 @@ const RESTORE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none
 // 全局同一时刻只有一次拖动/缩放；模块级引用让 ESC 能中断进行中的交互。
 let activeInteractionCancel = null;
 
-// deps: { store, mount?, snapThreshold? }
-export function createPanelLayer(deps) {
-  const store = deps.store;
+// deps: { mount?, snapThreshold? }
+export function createPanelLayer(store, deps = {}) {
   const mount = deps.mount ?? document.body;
   const snapThreshold = deps.snapThreshold ?? 24;
   const roots = new Map(); // id -> {root, header, body, title, maxBtn, closeBtn}
