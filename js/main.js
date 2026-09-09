@@ -14,6 +14,7 @@ import { createToolbar } from './ui/toolbar.js';
 import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
 import { createJournal, computeAudioContext } from './journal.js';
+import { createPanelManager } from './ui/panels/panelLayer.js';
 import { serializeSubtitle } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
@@ -125,6 +126,10 @@ cueList = createCueList({
 
 const draft = createDraftStore(store, agentMode ? { namespace: AGENT_QUERY_FLAG, autoSave: false } : {});
 
+// 浮动面板系统：P2 落地渲染壳与持久化，默认零面板（现有固定布局不受影响）；
+// P3 起管线面板等新界面经 panels.open() 打开（可拖动/缩放/吸附停靠）
+const panels = createPanelManager({ namespace: agentMode ? AGENT_QUERY_FLAG : '' });
+
 const toolbar = createToolbar({
   store,
   actions,
@@ -200,7 +205,7 @@ autoloadFromQuery();
 
 // window.agent：版本化契约（见 js/agent-api.js 与 .smoke/agent-contract.baseline.json）；
 // 调试句柄 __editor 保留（非契约，控制台排查用）
-window.__editor = { store, actions, player, waveform, timing, audioCommands, assPreview, journal };
+window.__editor = { store, actions, player, waveform, timing, audioCommands, assPreview, journal, panels };
 window.agent = createAgentApi({
   store,
   actions,
