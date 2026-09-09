@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>jassub-debug</title>
+<style>
+  body { font: 13px/1.5 monospace; background: #111; color: #9f9; padding: 12px; }
+  #video-box { position: relative; width: 640px; height: 360px; background: #000; margin-bottom: 10px; }
+  video { width: 100%; height: 100%; }
+  pre { white-space: pre-wrap; color: #f96; }
+  .ok { color: #4f4; }
+</style>
+</head>
+<body>
+<div id="video-box"><video id="v" muted playsinline src=".fixture/test-video.mp4"></video></div>
+<div id="status">starting…</div>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById('out');
+const statusEl = document.getElementById('status');
+function log(...args) {
+  out.textContent += args.map((a) => (a && a.stack ? a.stack : String(a))).join(' ') + '\n';
+}
+window.addEventListener('error', (e) => log('[window.error]', e.message, e.filename, e.lineno));
+window.addEventListener('unhandledrejection', (e) => log('[unhandledrejection]', e.reason && (e.reason.stack || e.reason.message) || e.reason));
+// 接住 JASSUB 内部 worker 的调试中继消息
+const OrigWorker = window.Worker;
+window.Worker = class extends OrigWorker {
+  constructor(url, opts) {
+    super(url, opts);
+    if (String(url).includes('jassub')) {
+      this.addEventListener('message', (e) => { if (e.data && e.data.__vstDebug) log('[worker]', e.data.__vstDebug); });
+      this.addEventListener('error', (e) => log('[worker.error]', e.message));
+    }
+  }
+};
+
+// ?worker=<url|bundle|dist> 选择 worker 文件
+const q = new URLSearchParams(location.search);
+const workerChoice = q.get('worker') || 'bundle';
+const WORKERS = {
+  bundle: new URL('vendor/jassub-worker.js', location.href).href,
+  // 上游 dist 目录里的未打包版（worker.js 是 ES module 且依赖相对导入），不能直接当 classic Worker 加载，
+  // 这里指向 dist 目录内已打包的 worker 文件
+  dist: new URL('vendor/jassub/worker/jassub-worker.js', location.href).href,
+};
+const workerUrl = WORKERS[workerChoice] || workerChoice;
+log('worker:', workerUrl);
+
+const video = document.getElementById('v');
+const fontUrl = new URL('vendor/jassub-default.woff2', location.href).href;
+const subContent = await (await fetch('.fixture/test.ass')).text();
+
+log('env:', 'crossOriginIsolated=', self.crossOriginIsolated, 'hardwareConcurrency=', navigator.hardwareConcurrency);
+
+function canvasStats(canvas) {
+  if (!canvas || !canvas.width) return 'no-canvas';
+  try {
+    const probe = document.createElement('canvas');
+    probe.width = canvas.width; probe.height = canvas.height;
+    const url = canvas.toDataURL();
+    const blank = url === probe.toDataURL();
+    return (blank ? 'BLANK' : 'PAINTED') + ' len=' + url.length + ' size=' + canvas.width + 'x' + canvas.height;
+  } catch (e) {
+    return 'stats-failed: ' + e.message;
+  }
+}
+
+try {
+  const jassub = new (await import('./vendor/jassub.esm.js')).default({
+    video,
+    subContent,
+    workerUrl,
+    wasmUrl: new URL('vendor/jassub-worker.wasm', location.href).href,
+    modernWasmUrl: new URL('vendor/jassub-worker.wasm', location.href).href,
+    availableFonts: { 'Liberation Sans': fontUrl },
+    defaultFont: 'Liberation Sans',
+  });
+  const verdict = await Promise.race([
+    jassub.ready.then(() => 'ready', (e) => { throw e; }),
+    new Promise((resolve) => setTimeout(() => resolve('TIMEOUT-20s'), 20000)),
+  ]);
+  if (verdict !== 'ready') {
+    statusEl.textContent = 'VERDICT: ' + verdict;
+    log('verdict:', verdict);
+    throw new Error('not ready: ' + verdict);
+  }
+  log('JASSUB ready ✔');
+  window.__jassub = jassub;
+  // 停在字幕区间（0.5s-5s）内再检测像素
+  await new Promise((r) => { video.onseeked = r; video.currentTime = 2; });
+  await video.play().catch((e) => log('play failed:', e.message));
+  await new Promise((r) => setTimeout(r, 400));
+  video.pause();
+  const canvas = document.querySelector('canvas.JASSUB');
+  statusEl.textContent = 'READY · ' + canvasStats(canvas);
+  statusEl.className = 'ok';
+  document.title = 'jassub-debug-OK';
+  log('final:', canvasStats(canvas));
+} catch (err) {
+  statusEl.textContent = 'FAILED';
+  log('FAILED:', err && (err.stack || err.message) || err);
+  document.title = 'jassub-debug-FAIL';
+}
+</script>
+</body>
+</html>
