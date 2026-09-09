@@ -15,6 +15,7 @@ import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
 import { createJournal, computeAudioContext } from './journal.js';
 import { createPanelManager } from './ui/panels/panelLayer.js';
+import { createPipelinePanel } from './ui/pipeline-panel.js';
 import { serializeSubtitle } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
@@ -32,6 +33,7 @@ const store = createStore();
 // 编辑日志：What 层音频特征由波形峰值派生（锚点前后各 2 秒窗口），waveform 稍后装配、惰性引用
 const journal = createJournal(store, {
   namespace: agentMode ? AGENT_QUERY_FLAG : '',
+  runId: () => store.state.pipelineRun?.runId ?? null,
   audioFeatures: (t0, t1) => {
     if (!waveform?.getPeaksData) return null;
     const anchor = t1 ?? t0;
@@ -141,6 +143,15 @@ const toolbar = createToolbar({
   flushEdits,
 });
 
+// 管线面板（P3）：提交任务 → 进度 → 载入产物（manifest 出处标注）→ 精修 → 导出
+const pipelinePanel = createPipelinePanel({
+  store,
+  panels,
+  openMediaFile: (file) => toolbar.openMediaFile(file),
+  openSubtitleFile: (file) => toolbar.openSubtitleFile(file),
+});
+document.getElementById('btn-pipeline')?.addEventListener('click', () => pipelinePanel.open());
+
 initShortcuts({
   store,
   actions,
@@ -188,15 +199,27 @@ async function loadFromUrl(url, open) {
   }
 }
 
-// 自动化测试/演示辅助：?media=<url>&subs=<url> 启动时直接加载（与打开文件同一路径）
+// 自动化测试/演示辅助：?media=<url>&subs=<url>&manifest=<url> 启动时直接加载
+// （与打开文件同一路径）；manifest 为 review-manifest-v1，载入后标注 cue 出处。
 async function autoloadFromQuery() {
   const q = new URLSearchParams(location.search);
   const media = q.get('media');
   const subs = q.get('subs');
-  if (!media && !subs) return;
+  const manifestUrl = q.get('manifest');
+  if (!media && !subs && !manifestUrl) return;
   try {
     if (media) await loadFromUrl(media, (f) => toolbar.openMediaFile(f));
     if (subs) await loadFromUrl(subs, (f) => toolbar.openSubtitleFile(f));
+    if (manifestUrl) {
+      const res = await fetch(manifestUrl);
+      if (res.ok) {
+        const manifest = await res.json();
+        store.patch({ pipelineRun: { taskId: manifest.task_id ?? null, runId: manifest.run_id ?? null } });
+        const { annotateProvenance } = await import('./ui/pipeline-panel.js');
+        const matched = annotateProvenance(store.state.cues, manifest);
+        if (matched) console.info(`[manifest] 已标注 ${matched} 条 cue 出处`);
+      }
+    }
   } catch (err) {
     console.warn('[autoload] 失败:', err);
   }

@@ -21,6 +21,7 @@ export function createStore() {
     dirty: false,
     savedAt: 0, // 最近一次草稿自动保存时间戳
     mediaLoaded: false,
+    pipelineRun: null, // { taskId, runId }：管线面板载入产物后记录（journal header 关联）
     // 音频盒选项（默认值对齐 Aegisub 3.2）
     audioOptions: {
       autoCommit: false, // Audio/Auto/Commit：改动立即写入（撤销合并）

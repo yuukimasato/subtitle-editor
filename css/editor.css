@@ -911,3 +911,107 @@ dialog code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4
 .fp-resize-nw { top: -5px;    left: -5px;   width: 14px;  height: 14px; cursor: nwse-resize; }
 .fp-resize-se { bottom: -5px; right: -5px;  width: 14px;  height: 14px; cursor: nwse-resize; }
 .fp-resize-sw { bottom: -5px; left: -5px;   width: 14px;  height: 14px; cursor: nesw-resize; }
+
+/* ---------- 管线面板（js/ui/pipeline-panel.js） ---------- */
+.pipe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.pipe-status-text {
+  font-size: 12px;
+  color: var(--text-dim, #94a3b8);
+  min-width: 0;
+  flex: 1 1 140px;
+}
+
+.pipe-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #64748b;
+  flex: none;
+}
+
+.pipe-dot-on { background: #34d399; }
+.pipe-dot-off { background: #f87171; }
+
+.pipe-base {
+  flex: 1 1 160px;
+  min-width: 140px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.pipe-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim, #94a3b8);
+}
+
+.pipe-select {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.pipe-file { font-size: 12px; max-width: 200px; }
+
+.pipe-file-name {
+  font-size: 12px;
+  color: var(--text-dim, #94a3b8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 120px;
+}
+
+.pipe-small { font-size: 12px; padding: 4px 10px; }
+
+.pipe-progress {
+  padding: 4px 12px 8px;
+}
+
+.pipe-progress-text {
+  font-size: 12px;
+  color: var(--text-dim, #94a3b8);
+  margin-bottom: 5px;
+}
+
+.pipe-progress-track {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+}
+
+.pipe-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7c9cff, #ad7bff);
+  transition: width 0.4s ease;
+}
+
+.pipe-result { gap: 10px; }
+
+.pipe-hint {
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+}
+
+.pipe-flow-hint {
+  padding: 0 12px 10px;
+  line-height: 1.6;
+}

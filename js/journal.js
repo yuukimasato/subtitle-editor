@@ -21,6 +21,7 @@ export const JOURNAL_SCHEMA = 'edit-journal-v1';
 //   now           可注入（单测）；返回 ISO 时间戳
 //   maxEvents     可注入（单测）；默认 MAX_EVENTS
 //   audioFeatures (t0, t1) => 音频特征 | null；main.js 由波形峰值派生注入
+//   runId         () => string | null；管线运行 ID（manifest 载入后），进导出 header
 // }
 export function createJournal(store, deps = {}) {
   const storage = deps.storage ?? defaultStorage();
@@ -140,6 +141,7 @@ export function createJournal(store, deps = {}) {
     const diff = diffCues(before, after);
     if (!diff.length) return;
     const primary = primaryCue(diff);
+    const anchorCues = primary?.side === 'after' ? after : before;
     const event = {
       schema: JOURNAL_SCHEMA,
       type: 'event',
@@ -152,11 +154,9 @@ export function createJournal(store, deps = {}) {
       targets: [...new Set(diff.map((d) => d.id))],
       diff,
       context: {
-        cue: primary ? cueContext(primary.side === 'after' ? after : before, primary.id) : null,
-        audio: primary && audioFeatures
-          ? safeAudio(primary.side === 'after' ? after : before, primary.id, primary.field)
-          : null,
-        provenance: null, // review-manifest-v1 接入（P3）后由管线出处填充
+        cue: primary ? cueContext(anchorCues, primary.id) : null,
+        audio: primary && audioFeatures ? safeAudio(anchorCues, primary.id, primary.field) : null,
+        provenance: primary ? provenanceOf(anchorCues, primary.id) : null,
       },
     };
     queue.events.push(event);
@@ -175,6 +175,12 @@ export function createJournal(store, deps = {}) {
     }
   }
 
+  // 管线出处：cue 上的 provenance 由管线面板载入产物时标注（见 ui/pipeline-panel.js）
+  function provenanceOf(cues, id) {
+    const cue = cues.find((c) => c.id === id);
+    return cue?.provenance ?? null;
+  }
+
   // 导出 NDJSON：首行文件级 header，其后按记录顺序逐行事件（session/seq 在事件内）。
   // 账本语义：导出不清空队列，重复导出由摄取端按 (session, seq) 去重。
   function exportText() {
@@ -188,6 +194,7 @@ export function createJournal(store, deps = {}) {
       version: SCHEMA_VERSION,
       exported_at: now(),
       file: { ...queue.file },
+      run_id: deps.runId?.() ?? null,
       event_count: queue.events.length,
       sessions,
       overflow: queue.overflow,
