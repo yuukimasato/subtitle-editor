@@ -98,6 +98,21 @@ export function createPipelineClient({ base = defaultBase(), fetchImpl = globalT
       return res.json();
     },
 
+    // 反馈学习（双界面收敛 M2）：音频 + 人工修订字幕 → 对齐/归因 → 写用户档案。
+    // 服务端契约：POST /api/feedback/learn（webui 反馈学习路由，字段见该路由定义）；
+    // dry_run=true 为预览差异，不写档案。服务端 run_pipeline_first 会先跑一遍管线，耗时较长。
+    async learn(audioFile, referenceFile, { profile = 'default', feedbackProfile = 'user_default', dryRun = false } = {}) {
+      const form = new FormData();
+      form.append('audio', audioFile, audioFile.name);
+      form.append('reference', referenceFile, referenceFile.name);
+      form.append('profile', profile);
+      form.append('feedback_profile', feedbackProfile);
+      form.append('run_pipeline_first', 'true');
+      form.append('dry_run', String(dryRun));
+      const res = await request('/api/feedback/learn', { method: 'POST', body: form });
+      return res.json();
+    },
+
     subtitleUrl(taskId, version = 'clean') {
       return `${base}/api/tasks/${encodeURIComponent(taskId)}/subtitle-file?version=${version}`;
     },

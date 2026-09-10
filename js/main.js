@@ -16,6 +16,7 @@ import { createDraftStore } from './draft.js';
 import { createJournal, computeAudioContext } from './journal.js';
 import { createPanelManager } from './ui/panels/panelLayer.js';
 import { createPipelinePanel } from './ui/pipeline-panel.js';
+import { createFeedbackPanel } from './ui/feedback-panel.js';
 import { createDetachableBlock, createDetachButton } from './ui/detach.js';
 import { serializeSubtitle } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
@@ -188,13 +189,32 @@ const toolbar = createToolbar({
 });
 
 // 管线面板（P3）：提交任务 → 进度 → 载入产物（manifest 出处标注）→ 精修 → 导出
+// 反馈学习面板（双界面收敛 M2）：当前会话音频 + 校对后字幕一键回传学习；
+// lastMediaFile 记录最近一次打开的媒体（File），供学习面板"从当前会话学习"取用。
+let lastMediaFile = null;
+const openMediaFileTracked = (file) => {
+  lastMediaFile = file;
+  return toolbar.openMediaFile(file);
+};
+
 const pipelinePanel = createPipelinePanel({
   store,
   panels,
-  openMediaFile: (file) => toolbar.openMediaFile(file),
+  openMediaFile: (file) => openMediaFileTracked(file),
   openSubtitleFile: (file) => toolbar.openSubtitleFile(file),
 });
 document.getElementById('btn-pipeline')?.addEventListener('click', () => pipelinePanel.open());
+
+const feedbackPanel = createFeedbackPanel({
+  store,
+  panels,
+  journal,
+  getMediaFile: () => lastMediaFile,
+});
+const feedbackBtn = document.getElementById('btn-feedback');
+feedbackBtn?.addEventListener('click', () => feedbackPanel.open());
+// 8613 离线时隐藏学习入口（编辑器离线能力不受影响）；探测放在空闲时避免抢占首屏
+feedbackBtn && queueMicrotask(() => feedbackPanel.syncAvailability(feedbackBtn));
 
 initShortcuts({
   store,
@@ -252,7 +272,7 @@ async function autoloadFromQuery() {
   const manifestUrl = q.get('manifest');
   if (!media && !subs && !manifestUrl) return;
   try {
-    if (media) await loadFromUrl(media, (f) => toolbar.openMediaFile(f));
+    if (media) await loadFromUrl(media, (f) => openMediaFileTracked(f));
     if (subs) await loadFromUrl(subs, (f) => toolbar.openSubtitleFile(f));
     if (manifestUrl) {
       const res = await fetch(manifestUrl);
@@ -279,7 +299,7 @@ window.agent = createAgentApi({
   player,
   waveform,
   journal,
-  loadMedia: (url) => loadFromUrl(url, (f) => toolbar.openMediaFile(f)),
+  loadMedia: (url) => loadFromUrl(url, (f) => openMediaFileTracked(f)),
   loadSubs: (url) => loadFromUrl(url, (f) => toolbar.openSubtitleFile(f)),
   saveDraft: () => draft.saveNow(true),
 });
