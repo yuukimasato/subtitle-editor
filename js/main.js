@@ -16,6 +16,7 @@ import { createDraftStore } from './draft.js';
 import { createJournal, computeAudioContext } from './journal.js';
 import { createPanelManager } from './ui/panels/panelLayer.js';
 import { createPipelinePanel } from './ui/pipeline-panel.js';
+import { createDetachableBlock, createDetachButton } from './ui/detach.js';
 import { serializeSubtitle } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
@@ -131,6 +132,49 @@ const draft = createDraftStore(store, agentMode ? { namespace: AGENT_QUERY_FLAG,
 // 浮动面板系统：P2 落地渲染壳与持久化，默认零面板（现有固定布局不受影响）；
 // P3 起管线面板等新界面经 panels.open() 打开（可拖动/缩放/吸附停靠）
 const panels = createPanelManager({ namespace: agentMode ? AGENT_QUERY_FLAG : '' });
+
+// 存量区块浮出（P2 收尾，方案 §3.4）：默认固定布局零变化，点「⧉」把整块搬进可拖动/
+// 缩放/吸附的浮动窗口，关闭面板（X/ESC）即自动回驻。波形依赖 ResizeObserver 自适应，
+// DOM 原地迁移后无需重建；浮出状态持久化，重载恢复。
+const waveDetachBtn = createDetachButton();
+waveDetachBtn.el.className = 'abtn detach-btn';
+$('#audio-toolbar').appendChild(waveDetachBtn.el);
+const waveBlock = createDetachableBlock({
+  panels,
+  store: panels.store,
+  id: 'wave',
+  title: '音频盒（波形定时区）',
+  slot: $('.wave-wrap'),
+  nodes: [$('.wave-main'), $('#audio-toolbar')],
+  width: 820,
+  height: 240,
+  minWidth: 420,
+  minHeight: 180,
+  namespace: agentMode ? AGENT_QUERY_FLAG : '',
+  onChange: (isDetached) => waveDetachBtn.sync(isDetached),
+});
+waveDetachBtn.el.addEventListener('click', () => (waveBlock.detached ? waveBlock.dock() : waveBlock.detach()));
+
+const cueDetachBtn = createDetachButton();
+cueDetachBtn.el.className = 'btn detach-btn';
+$('#cue-tools').appendChild(cueDetachBtn.el);
+const cueBlock = createDetachableBlock({
+  panels,
+  store: panels.store,
+  id: 'cues',
+  title: '字幕列表',
+  slot: $('.cue-pane'),
+  nodes: [$('#cue-tools'), $('.cue-table-wrap')],
+  width: 440,
+  height: 480,
+  minWidth: 340,
+  minHeight: 240,
+  namespace: agentMode ? AGENT_QUERY_FLAG : '',
+  onChange: (isDetached) => cueDetachBtn.sync(isDetached),
+});
+cueDetachBtn.el.addEventListener('click', () => (cueBlock.detached ? cueBlock.dock() : cueBlock.detach()));
+waveBlock.restore();
+cueBlock.restore();
 
 const toolbar = createToolbar({
   store,

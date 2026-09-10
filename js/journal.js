@@ -10,8 +10,10 @@ import { cueStyle } from './format/index.js';
 const PREFIX = 'vstEditor.journal.';
 const ENABLE_KEY = 'vstEditor.journalEnabled';
 const SAVE_DELAY = 1000;
-// 队列轮转上限：触顶后停止追加并置 overflow（导出与 agent 快照可见），避免撑爆配额
+// 轮转上限：事件数或序列化体积（JSON 字符数近似，2M 字符 ≈ UTF-8 下 2-6MB，处于
+// localStorage 5-10MB 配额安全区）任一触顶即丢最旧保最新，并置 overflow 提示导出
 const MAX_EVENTS = 5000;
+const MAX_CHARS = 2_000_000;
 const SCHEMA_VERSION = 1;
 export const JOURNAL_SCHEMA = 'edit-journal-v1';
 
@@ -20,6 +22,7 @@ export const JOURNAL_SCHEMA = 'edit-journal-v1';
 //   storage       可注入（单测）；默认 localStorage，不可用时静默降级为内存队列
 //   now           可注入（单测）；返回 ISO 时间戳
 //   maxEvents     可注入（单测）；默认 MAX_EVENTS
+//   maxBytes      可注入（单测）；默认 MAX_CHARS（序列化 JSON 字符数预算）
 //   audioFeatures (t0, t1) => 音频特征 | null；main.js 由波形峰值派生注入
 //   runId         () => string | null；管线运行 ID（manifest 载入后），进导出 header
 // }
@@ -27,6 +30,7 @@ export function createJournal(store, deps = {}) {
   const storage = deps.storage ?? defaultStorage();
   const now = deps.now ?? (() => new Date().toISOString());
   const maxEvents = deps.maxEvents ?? MAX_EVENTS;
+  const maxBytes = deps.maxBytes ?? MAX_CHARS;
   const audioFeatures = deps.audioFeatures ?? null;
   const prefix = deps.namespace ? `${PREFIX}${deps.namespace}:` : PREFIX;
 
@@ -37,7 +41,7 @@ export function createJournal(store, deps = {}) {
   let timer = null;
 
   function emptyQueue() {
-    return { version: SCHEMA_VERSION, file: { subtitle: '', media: '' }, overflow: false, events: [] };
+    return { version: SCHEMA_VERSION, file: { subtitle: '', media: '' }, overflow: false, rotated: 0, bytes: 0, events: [] };
   }
 
   function isEnabled() {
@@ -86,7 +90,17 @@ export function createJournal(store, deps = {}) {
       const raw = storage.getItem(key);
       const data = raw ? JSON.parse(raw) : null;
       if (data?.version === SCHEMA_VERSION && Array.isArray(data.events)) {
-        queue = { ...data, events: data.events };
+        // 旧版队列没有 rotated/bytes 字段：字节预算从现有事件重算（轮转才需要，装载时算一次）
+        queue = {
+          version: SCHEMA_VERSION,
+          file: data.file ?? { subtitle: '', media: '' },
+          overflow: Boolean(data.overflow),
+          rotated: Number.isFinite(data.rotated) ? data.rotated : 0,
+          bytes: Number.isFinite(data.bytes)
+            ? data.bytes
+            : data.events.reduce((sum, event) => sum + JSON.stringify(event).length, 0),
+          events: data.events,
+        };
       } else {
         queue = emptyQueue();
         queue.file = file;
@@ -134,9 +148,7 @@ export function createJournal(store, deps = {}) {
   function record({ command, coalesceKey = null, before, after }) {
     if (!isEnabled()) return;
     if (!syncQueue()) return; // 未加载字幕：无上下文可记
-    const file = fileIdentity();
-    queue.file = file;
-    if (queue.overflow) return;
+    queue.file = fileIdentity();
     if (!current) newSession();
     const diff = diffCues(before, after);
     if (!diff.length) return;
@@ -145,7 +157,7 @@ export function createJournal(store, deps = {}) {
     const event = {
       schema: JOURNAL_SCHEMA,
       type: 'event',
-      session: current.id,
+      session_id: current.id,
       seq: current.seq++,
       ts: now(),
       actor,
@@ -160,7 +172,16 @@ export function createJournal(store, deps = {}) {
       },
     };
     queue.events.push(event);
-    if (queue.events.length >= maxEvents) queue.overflow = true;
+    queue.bytes += JSON.stringify(event).length;
+    // 轮转：丢最旧保最新（近期编辑最有价值），overflow 提示尽快导出留档；
+    // 单条事件即超预算时仍保留最新一条（最后状态可重放优先于体积预算）
+    while (queue.events.length > 1 &&
+           (queue.events.length > maxEvents || (maxBytes > 0 && queue.bytes > maxBytes))) {
+      queue.bytes -= JSON.stringify(queue.events[0]).length;
+      queue.events.shift();
+      queue.rotated += 1;
+    }
+    queue.overflow = queue.rotated > 0;
     persistLater();
   }
 
@@ -187,7 +208,7 @@ export function createJournal(store, deps = {}) {
     syncQueue();
     persistNow();
     if (!queue.events.length) return null;
-    const sessions = [...new Set(queue.events.map((e) => e.session))];
+    const sessions = [...new Set(queue.events.map((e) => e.session_id))];
     const header = {
       schema: JOURNAL_SCHEMA,
       type: 'header',
@@ -196,7 +217,9 @@ export function createJournal(store, deps = {}) {
       file: { ...queue.file },
       run_id: deps.runId?.() ?? null,
       event_count: queue.events.length,
+      session_id: sessions[0] ?? null,
       sessions,
+      rotated: queue.rotated,
       overflow: queue.overflow,
     };
     return [JSON.stringify(header), ...queue.events.map((e) => JSON.stringify(e))].join('\n') + '\n';
@@ -223,7 +246,7 @@ export function createJournal(store, deps = {}) {
 
   function stats() {
     syncQueue();
-    return { enabled: isEnabled(), events: queue.events.length, overflow: queue.overflow };
+    return { enabled: isEnabled(), events: queue.events.length, rotated: queue.rotated, overflow: queue.overflow };
   }
 
   return {

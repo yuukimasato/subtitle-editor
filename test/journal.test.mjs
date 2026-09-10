@@ -39,6 +39,7 @@ function setup({ journalDeps = {} } = {}) {
     storage,
     now: () => '2026-09-10T00:00:00Z',
     maxEvents: journalDeps.maxEvents,
+    maxBytes: journalDeps.maxBytes,
     audioFeatures: journalDeps.audioFeatures ?? null,
   });
   const actions = createActions(store, { journal });
@@ -204,16 +205,33 @@ test('换文件即换队列，旧文件账本落盘、新文件独立', () => {
   assert.equal(reopened.journal.stats().events, 1);
 });
 
-test('轮转上限：触顶停记并置 overflow，清空后恢复', () => {
+test('轮转上限：丢最旧保最新并置 overflow，清空后恢复', () => {
   const { actions, journal } = setup({ journalDeps: { maxEvents: 3 } });
   loadFixture(actions);
-  for (let i = 0; i < 6; i++) actions.updateCueTimes('a', 1 + i * 0.01, 3);
+  for (let i = 1; i <= 6; i++) actions.updateCueTimes('a', 1 + i * 0.01, 3);
   assert.equal(journal.stats().events, 3);
+  assert.equal(journal.stats().rotated, 3);
   assert.equal(journal.stats().overflow, true);
-  const header = parseNdjson(journal.exportText())[0];
+  const [header, ...events] = parseNdjson(journal.exportText());
+  assert.equal(header.rotated, 3);
   assert.equal(header.overflow, true);
+  assert.deepEqual(events.map((e) => e.seq), [3, 4, 5]); // 最近 3 条
+  assert.equal(events.at(-1).diff[0].changes[0].after, 1.06); // 最新状态可重放
   journal.clear();
-  assert.deepEqual(journal.stats(), { enabled: true, events: 0, overflow: false });
+  assert.deepEqual(journal.stats(), { enabled: true, events: 0, rotated: 0, overflow: false });
+});
+
+test('字节上限：超预算触发轮转，最新事件始终保留', () => {
+  const { actions, journal } = setup({ journalDeps: { maxBytes: 500 } });
+  loadFixture(actions);
+  const longText = '字'.repeat(60);
+  for (let i = 0; i < 5; i++) actions.updateCue('a', { text: longText + i });
+  const stats = journal.stats();
+  assert.ok(stats.events >= 1 && stats.events < 5, `轮转后应保留部分事件，实际 ${stats.events}`);
+  assert.ok(stats.rotated >= 1);
+  assert.equal(stats.overflow, true);
+  const last = eventsOf(journal).at(-1);
+  assert.equal(last.diff[0].changes[0].after, longText + '4');
 });
 
 test('关停后不记录', () => {
@@ -221,8 +239,27 @@ test('关停后不记录', () => {
   loadFixture(actions);
   journal.setEnabled(false);
   actions.updateCueTimes('a', 1.5, 3);
-  assert.deepEqual(journal.stats(), { enabled: false, events: 0, overflow: false });
+  assert.deepEqual(journal.stats(), { enabled: false, events: 0, rotated: 0, overflow: false });
   assert.equal(journal.exportText(), null);
+});
+
+// ---------- 契约一致性（与 Python 摄取端/ sink 校验对齐） ----------
+
+test('契约一致性：事件与 header 携带 session_id 必填字段，schema 为 edit-journal-v1', () => {
+  const { actions, journal } = setup();
+  loadFixture(actions);
+  actions.updateCueTimes('a', 1.5, 3);
+  const [header, event] = parseNdjson(journal.exportText());
+  // 摄取端必填字段（vocal_subtitle/feedback/journal_ingest.py 与 webui routes_journal 同一契约）：
+  // 缺任一项事件会被整体拒绝，学习闭环断流
+  for (const field of ['schema', 'type', 'session_id', 'seq', 'command']) {
+    assert.ok(field in event, `事件缺少契约必填字段 ${field}`);
+  }
+  assert.equal(event.schema, 'edit-journal-v1');
+  assert.match(String(event.session_id), /^s-/);
+  // sink 按 header.session_id 路由会话文件；sessions 数组为多会话队列的追加字段
+  assert.equal(header.session_id, event.session_id);
+  assert.deepEqual(header.sessions, [event.session_id]);
 });
 
 // ---------- 重放还原（验收：原始字幕 + 日志 = 最终字幕） ----------

@@ -61,7 +61,9 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     if (!journal) return;
     const stats = journal.stats();
     journalEnabledInput.checked = stats.enabled;
-    journalStatsEl.textContent = `已记录 ${stats.events} 条事件${stats.overflow ? '（已达上限，请导出或清空）' : ''}`;
+    journalStatsEl.textContent = stats.rotated
+      ? `已记录 ${stats.events} 条事件（已轮转最旧 ${stats.rotated} 条，建议导出留档）`
+      : `已记录 ${stats.events} 条事件`;
   }
   if (journal) {
     buttons.journal.addEventListener('click', () => {
@@ -82,6 +84,32 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
       downloadTextFile(`${base}.journal.jsonl`, text, 'application/x-ndjson');
       showToast('编辑日志已导出');
       syncJournalUi();
+    });
+    // 本机 sink 上送（V1.5）：探测 → 批量 POST，服务端按 (session_id, seq) 幂等去重。
+    // 惰性 import：不联网的 standalone 用例不加载管线客户端。
+    const pushBtn = document.getElementById('btn-journal-push');
+    pushBtn?.addEventListener('click', async () => {
+      const text = journal.exportText();
+      if (!text) {
+        showToast('当前文件还没有可上送的日志', 'error');
+        return;
+      }
+      pushBtn.disabled = true;
+      try {
+        const { createPipelineClient } = await import('../pipeline.js');
+        const pipeline = createPipelineClient();
+        const detection = await pipeline.detect();
+        if (!detection.ok) {
+          showToast(`未检测到管线服务（${detection.error || '离线'}），请改用「导出日志」`, 'error');
+          return;
+        }
+        const result = await pipeline.postJournal(text);
+        showToast(`日志已上送：接收 ${result.accepted} 条${result.duplicates ? `，去重 ${result.duplicates} 条` : ''}${result.rejected ? `，拒绝 ${result.rejected} 条` : ''}`);
+      } catch (err) {
+        showToast(`上送失败：${err.message}`, 'error');
+      } finally {
+        pushBtn.disabled = false;
+      }
     });
     document.getElementById('btn-journal-clear').addEventListener('click', () => {
       if (confirm('确定清空当前文件的编辑日志？清空后不可恢复。')) {

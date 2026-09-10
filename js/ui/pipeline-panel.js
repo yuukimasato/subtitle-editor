@@ -150,7 +150,7 @@ export function createPipelinePanel({ store, panels, openMediaFile, openSubtitle
 
     async function submit() {
       const file = fileInput.files[0];
-      if (!file) return;
+      if (!file || input?.disposed) return;
       submitBtn.disabled = true;
       setProgress('正在上传…');
       try {
@@ -169,8 +169,10 @@ export function createPipelinePanel({ store, panels, openMediaFile, openSubtitle
     }
 
     async function poll(taskId) {
+      if (input?.disposed) return; // 面板已销毁：停止轮询，不再写已脱离的 DOM
       try {
         const task = await pipeline.taskStatus(taskId);
+        if (input?.disposed) return;
         if (task.status === 'completed' || task.status === 'degraded_completed') {
           setProgress('管线完成，可以载入产物', 1);
           await prepareResult(taskId);
@@ -185,12 +187,14 @@ export function createPipelinePanel({ store, panels, openMediaFile, openSubtitle
         const stage = task.progress?.description || task.progress?.stage;
         setProgress(stage ? `处理中：${stage}` : '处理中…', task.progress?.progress ?? null);
       } catch (err) {
+        if (input?.disposed) return;
         setProgress('');
         showToast(`查询进度失败：${err.message}`, 'error');
         submitBtn.disabled = false;
         return;
       }
-      input.pollTimer = setTimeout(() => poll(taskId), 1500);
+      // 输入被重置（换地址/重渲染）时不再续订下一轮
+      if (input) input.pollTimer = setTimeout(() => poll(taskId), 1500);
     }
 
     async function prepareResult(taskId) {

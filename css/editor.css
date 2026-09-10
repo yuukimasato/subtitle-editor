@@ -1015,3 +1015,47 @@ dialog code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4
   padding: 0 12px 10px;
   line-height: 1.6;
 }
+
+/* ---------- 可脱高区块（P2 收尾）：浮出为浮动面板，默认固定布局零变化 ---------- */
+
+/* 浮出/回驻按钮：音频盒工具条里用 abtn 形态，cue 工具条里用 btn 形态 */
+.detach-btn {
+  flex: none;
+  color: var(--text-secondary);
+}
+.detach-btn-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 浮出后槽位里的占位条 */
+.detach-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  margin: 2px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* 面板体内嵌区块：宿主镜像原槽位布局（节点引用不变，样式随行） */
+.fp-body:has(> .detach-host) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+.detach-host {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-secondary);
+}
+.detach-host-wave .wave-main { flex: 1; min-height: 0; }
+.detach-host-cues { gap: 8px; padding: 10px; }
+.detach-host-cues .cue-table-wrap { flex: 1; min-height: 0; }

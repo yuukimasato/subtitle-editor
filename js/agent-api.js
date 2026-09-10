@@ -83,8 +83,9 @@ export function createAgentApi(deps) {
         canRedo: !!actions.history.canRedo,
         depth: actions.history.past.length, // Agent 批量写操作后核对 coalesce 生效
       },
+      // 契约冻结子集（.smoke/agent-contract.baseline.json）：stats() 的 rotated 供 UI 提示，不进快照
       journal: journal
-        ? journal.stats()
+        ? (({ enabled, events, overflow }) => ({ enabled, events, overflow }))(journal.stats())
         : { enabled: false, events: 0, overflow: false },
     };
   }
