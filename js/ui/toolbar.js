@@ -1,11 +1,38 @@
-// 顶栏：打开文件、拖放、撤销重做、导出、帮助与关于。
+// 顶栏：打开文件、拖放、撤销重做、导出、说话人开关、帮助与关于。
 import { parseSubtitle, serializeSubtitle, ensureDoc, FORMATS } from '../format/index.js';
+import { applySpeakerExport } from '../format/speaker-export.js';
 import { showToast } from './toast.js';
 
 const MEDIA_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|mp3|wav|flac|m4a|ogg|opus)$/i;
 const SUB_EXT = /\.(srt|vtt|ass|ssa)$/i;
+// 说话人开关持久化键：'0'=导出剥离说话人，其余（含未设置）=携带（默认开）
+const EXPORT_SPEAKERS_KEY = 'vstEditor.exportSpeakers';
 
-export function createToolbar({ store, actions, player, waveform, assPreview, draft, journal, flushEdits }) {
+export function speakersIncluded(storage = safeStorage()) {
+  try {
+    return storage.getItem(EXPORT_SPEAKERS_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setSpeakersIncluded(value, storage = safeStorage()) {
+  try {
+    storage.setItem(EXPORT_SPEAKERS_KEY, value ? '1' : '0');
+  } catch {
+    // 存储不可用：仅本次会话生效
+  }
+}
+
+function safeStorage() {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+export function createToolbar({ store, actions, player, waveform, assPreview, draft, journal, flushEdits, onExported }) {
   const mediaInput = document.getElementById('media-input');
   const subtitleInput = document.getElementById('subtitle-input');
   const buttons = {
@@ -55,6 +82,16 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
   exportButtons.forEach((btn, format) => {
     btn.addEventListener('click', () => download(format));
   });
+
+  // ---------- 说话人开关（导出/同步是否携带说话人，默认开） ----------
+  const speakersInput = document.getElementById('export-speakers');
+  if (speakersInput) {
+    speakersInput.checked = speakersIncluded();
+    speakersInput.addEventListener('change', () => {
+      setSpeakersIncluded(speakersInput.checked);
+      showToast(speakersInput.checked ? '导出将携带说话人' : '导出将剥离说话人（编辑数据不受影响）');
+    });
+  }
 
   // ---------- 编辑日志（本地行为记录，见 js/journal.js） ----------
   function syncJournalUi() {
@@ -192,9 +229,11 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
       return;
     }
     const fmt = FORMATS.some((f) => f.id === format) ? format : 'ass';
+    // 说话人开关（默认开）：导出稿按策略携带/剥离说话人；副本变换，编辑数据不动
+    const exportCues = applySpeakerExport(s.cues, { format: fmt, include: speakersIncluded() });
     let content;
     try {
-      content = serializeSubtitle(fmt, s.cues, ensureDoc(fmt, s.cues, s.subDoc));
+      content = serializeSubtitle(fmt, exportCues, ensureDoc(fmt, exportCues, s.subDoc));
     } catch (err) {
       showToast(`导出失败：${err.message}`, 'error');
       return;
@@ -219,6 +258,7 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
       if (journal.stats().overflow) journalNote += '（日志已达上限，建议尽快留档）';
     }
     showToast(`已导出 ${base}.${fmt}${journalNote}`);
+    onExported?.(); // 导出即最新：立即同步一稿到处理台（如已启用）
   }
 
   function downloadTextFile(filename, text, mime = 'text/plain;charset=utf-8') {
@@ -235,5 +275,6 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     exportCurrent: () => download(store.state.subtitleFormat || 'ass'),
     openMediaFile,
     openSubtitleFile,
+    speakersIncluded,
   };
 }

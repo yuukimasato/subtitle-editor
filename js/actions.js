@@ -135,7 +135,8 @@ export function createActions(store, deps = {}) {
       return true;
     },
 
-    // 打开字幕文件：清空历史
+    // 打开字幕文件：清空历史。subtitleSource='file' 供会话来源判定区分
+    // "打开存量字幕"（existing-subtitle）与"从零打轴"（from-scratch-timing）。
     loadSubtitle(cues, { name, format, doc }) {
       history.clear();
       const sorted = sortCues(cues);
@@ -144,6 +145,7 @@ export function createActions(store, deps = {}) {
         subDoc: doc,
         subtitleFormat: format,
         subtitleName: name,
+        subtitleSource: 'file',
         dirty: false,
         editingId: null,
         selectedIds: sorted[0] ? [sorted[0].id] : [],

@@ -14,11 +14,12 @@ import { createToolbar } from './ui/toolbar.js';
 import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
 import { createJournal, computeAudioContext } from './journal.js';
+import { createSubtitleSync } from './sync.js';
 import { createPanelManager } from './ui/panels/panelLayer.js';
 import { createPipelinePanel } from './ui/pipeline-panel.js';
 import { createFeedbackPanel } from './ui/feedback-panel.js';
 import { createDetachableBlock, createDetachButton } from './ui/detach.js';
-import { serializeSubtitle } from './format/index.js';
+import { serializeSubtitle, ensureDoc } from './format/index.js';
 import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
 
@@ -186,7 +187,32 @@ const toolbar = createToolbar({
   draft,
   journal,
   flushEdits,
+  onExported: () => subtitleSync?.flush(), // 导出即最新：导出成功后立即同步一稿
 });
+
+// 字幕自动同步（editor-sync-v1）：每次编辑提交后把当前稿 POST 到处理台（8613），
+// 处理台工作台可随时下载最新稿；说话人开关与导出共用（toolbar.speakersIncluded）。
+// 与工具栏一样惰性引用（const 提升前仅进回调，调用时均已初始化）。
+let pipelineClient = null;
+const subtitleSync = createSubtitleSync(store, {
+  agentMode,
+  serialize: (cues, format, doc) => serializeSubtitle(format, cues, ensureDoc(format, cues, doc)),
+  includeSpeakers: () => toolbar.speakersIncluded(),
+  statusEl: $('#sync-status'),
+  notify: (message, type) => showToast(message, type),
+  post: async (payload) => {
+    if (!pipelineClient) {
+      const { createPipelineClient } = await import('./pipeline.js');
+      pipelineClient = createPipelineClient();
+    }
+    return pipelineClient.postSubtitleSync(payload);
+  },
+});
+// 页面隐藏/关闭瞬间的最后一次改动也立即上送（fetch keepalive）
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) subtitleSync.flush();
+});
+window.addEventListener('beforeunload', () => subtitleSync.flush());
 
 // 管线面板（P3）：提交任务 → 进度 → 载入产物（manifest 出处标注）→ 精修 → 导出
 // 反馈学习面板（双界面收敛 M2）：当前会话音频 + 校对后字幕一键回传学习；

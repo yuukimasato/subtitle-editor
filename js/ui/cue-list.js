@@ -2,11 +2,23 @@
 // 多选（Ctrl/Shift）与右键行操作菜单、播放高亮与跟随滚动。
 // 渲染采用行级增量更新，编辑中不整表重建，避免打断输入焦点。
 import { formatClock, formatDuration, parseFlexibleTime } from '../format/time.js';
+import { splitSpeaker, joinSpeaker } from '../format/cue.js';
+import { splitAssTags, joinAssTags } from '../format/ass.js';
 import { cueStyle } from '../format/index.js';
 import { showToast } from './toast.js';
 
 const TEXT_COMMIT_DELAY = 700;
-const COLS = 7;
+const COLS = 8;
+// 说话人列显隐持久化键：'0'=隐藏，其余（含未设置）=显示（默认显示，取自文本开头的 [标签] 前缀）
+const SHOW_SPEAKERS_KEY = 'vstEditor.showSpeakers';
+
+function showSpeakersPreferred() {
+  try {
+    return localStorage.getItem(SHOW_SPEAKERS_KEY) !== '0';
+  } catch {
+    return true; // 存储不可用：本次会话保持默认显示
+  }
+}
 
 export function createCueList({
   store,
@@ -23,6 +35,8 @@ export function createCueList({
   const rows = new Map(); // id → 行视图
   const pending = new Map(); // id → 文本字段防抖定时器
   const timeDirty = new Set(); // id → 时间字段已改动，待 blur/Enter 提交
+  const rawEdits = new Set(); // id → 编辑框已换成含标签原始正文，提交按原样采用
+  let showSpeakers = showSpeakersPreferred();
   let orderedIds = [];
   let focusedId = null;
   let lastActiveId = null;
@@ -55,6 +69,21 @@ export function createCueList({
     followBox.checked = s.follow;
   });
 
+  // 说话人列开关（默认隐藏）：勾选且数据里确有前缀时才显示整列
+  const speakersBox = toolsEl.querySelector('#show-speakers');
+  if (speakersBox) {
+    speakersBox.checked = showSpeakers;
+    speakersBox.addEventListener('change', () => {
+      showSpeakers = speakersBox.checked;
+      try {
+        localStorage.setItem(SHOW_SPEAKERS_KEY, showSpeakers ? '1' : '0');
+      } catch {
+        // 存储不可用：仅本次会话生效
+      }
+      reconcile();
+    });
+  }
+
   // 草稿自动保存状态提示
   store.on('savedAt', (s) => {
     if (statusEl && s.savedAt) {
@@ -77,14 +106,22 @@ export function createCueList({
     pending.set(id, setTimeout(() => commitRow(id), TEXT_COMMIT_DELAY));
   }
 
-  // 文本字段的防抖提交（只管文本；时间改走 blur/Enter 提交，避免半输入中间值写库）
+  // 文本字段的防抖提交（只管文本；时间改走 blur/Enter 提交，避免半输入中间值写库）。
+  // 输入框里是去掉说话人前缀与 ASS 标签段的纯正文，提交时按原前缀/原标签拼回，
+  // cue.text 数据保持完整；双击进入的编辑换成原始正文，提交按原样采用（可增删标签）
   function commitRow(id) {
     clearTimeout(pending.get(id));
     if (!pending.delete(id)) return; // 该行没有等待提交的文本编辑
     const view = rows.get(id);
     const cue = store.state.cues.find((c) => c.id === id);
     if (!view || !cue) return;
-    if (view.text.value !== cue.text) actions.updateCue(id, { text: view.text.value });
+    const isAss = store.state.subtitleFormat === 'ass';
+    let editedBody = view.text.value;
+    if (isAss && !rawEdits.delete(id)) {
+      editedBody = joinAssTags(splitSpeaker(cue.text).body, editedBody);
+    }
+    const nextText = joinSpeaker(cue.text, editedBody);
+    if (nextText !== cue.text) actions.updateCue(id, { text: nextText });
   }
 
   // 时间字段的提交：blur/Enter（或 flushEdits）时执行；无效值不落库（blur 校验已提示）
@@ -163,7 +200,8 @@ export function createCueList({
     view.text.setSelectionRange(len, len);
   }
 
-  // 双击进入编辑：文本按落点定位光标，时间整段选中便于直接重打
+  // 双击进入编辑：文本按落点定位光标，时间整段选中便于直接重打。
+  // ASS 文本换成含标签的原始正文（展示层平时剥掉标签，进编辑才可见可改）
   function beginEdit(id, field, event) {
     const view = rows.get(id);
     if (!view) return;
@@ -171,6 +209,14 @@ export function createCueList({
     setEditingRow(id, true);
     const isTime = field === 'start' || field === 'end';
     const input = isTime ? view[field] : view.text;
+    if (!isTime && !pending.has(id)) {
+      const cue = store.state.cues.find((c) => c.id === id);
+      if (cue && store.state.subtitleFormat === 'ass') {
+        view.text.value = splitSpeaker(cue.text).body;
+        rawEdits.add(id);
+        autosize(view.text);
+      }
+    }
     input.focus();
     if (isTime) {
       input.select();
@@ -206,6 +252,7 @@ export function createCueList({
       <td class="time" title="结束时间（双击编辑，回车或移开焦点提交）"><input class="edit-time mono" data-field="end"></td>
       <td class="dur mono"></td>
       <td class="style-cell"><select class="edit-style" title="ASS 样式（Aegisub 样式列）"></select></td>
+      <td class="speaker-cell"></td>
       <td class="text-cell" title="字幕文本（双击编辑，修改后自动保存）"><textarea class="edit-text" rows="1"></textarea></td>
       <td class="ops"><button type="button" class="op play" title="播放此句">▶</button></td>`;
     const view = {
@@ -215,6 +262,7 @@ export function createCueList({
       end: tr.querySelector('[data-field="end"]'),
       dur: tr.querySelector('.dur'),
       style: tr.querySelector('.edit-style'),
+      speaker: tr.querySelector('.speaker-cell'),
       text: tr.querySelector('.edit-text'),
       play: tr.querySelector('.op.play'),
     };
@@ -308,15 +356,28 @@ export function createCueList({
   }
 
   // ---------- 渲染（增量） ----------
+  // 展示用纯正文：数据里的说话人前缀与行首 ASS 标签段都只在显示层拆掉
+  function displayBodyOf(cue) {
+    const { body } = splitSpeaker(cue.text);
+    return store.state.subtitleFormat === 'ass' ? splitAssTags(body).body : body;
+  }
+
   function updateRow(view, cue) {
     if (pending.has(cue.id)) return; // 编辑中的行等提交后再回写
     const active = document.activeElement;
     const startText = formatClock(cue.start);
     const endText = formatClock(cue.end);
+    // 说话人/标签在显示层拆出（数据仍是完整 cue.text），文本框只放纯正文
+    const { speaker } = splitSpeaker(cue.text);
+    if (view.speaker.textContent !== (speaker ?? '')) {
+      view.speaker.textContent = speaker ?? '';
+      view.speaker.title = speaker ?? ''; // 长标签被省略号截断时悬停看全称
+    }
     if (active !== view.start && view.start.value !== startText) view.start.value = startText;
     if (active !== view.end && view.end.value !== endText) view.end.value = endText;
-    if (active !== view.text && view.text.value !== cue.text) {
-      view.text.value = cue.text;
+    const body = displayBodyOf(cue);
+    if (active !== view.text && view.text.value !== body) {
+      view.text.value = body;
       autosize(view.text); // 仅文本变化时量高：每行一次强制重排，大表下开销显著
     }
     // 时间已是一致值（提交后回写）：清掉上次非法输入或起止冲突留下的红框，
@@ -333,12 +394,19 @@ export function createCueList({
     const cues = store.state.cues;
     const cueIds = new Set(cues.map((c) => c.id)); // 集合化避免逐行 some() 的 O(n²)
 
+    // 说话人列默认隐藏：勾选「说话人」且数据里确有前缀时才显示（同样式列的 hide-style 约定）
+    wrapEl.classList.toggle(
+      'hide-speaker',
+      !(showSpeakers && cues.some((c) => splitSpeaker(c.text).speaker !== null)),
+    );
+
     rows.forEach((view, id) => {
       if (!cueIds.has(id)) {
         view.tr.remove();
         clearTimeout(pending.get(id));
         pending.delete(id);
         timeDirty.delete(id);
+        rawEdits.delete(id);
         rows.delete(id);
       }
     });
@@ -426,7 +494,21 @@ export function createCueList({
     focusedId = null;
     // 焦点离开本行（含点到行外）即退出编辑态：输入框重新让出指针事件，单击回到只选中行
     const tr = event.target.closest?.('tr[data-id]');
-    if (tr && !tr.contains(event.relatedTarget)) tr.classList.remove('editing');
+    if (tr && !tr.contains(event.relatedTarget)) {
+      tr.classList.remove('editing');
+      // 双击编辑可能把文本框换成了含标签原始正文，退出后回写展示用纯正文
+      const id = tr.dataset.id;
+      const view = rows.get(id);
+      const cue = view && !pending.has(id) ? store.state.cues.find((c) => c.id === id) : null;
+      rawEdits.delete(id); // 无论本次是否提交过，退出编辑后不再按「原始正文编辑」对待
+      if (view && cue) {
+        const plain = displayBodyOf(cue);
+        if (view.text.value !== plain) {
+          view.text.value = plain;
+          autosize(view.text);
+        }
+      }
+    }
   });
 
   // ---------- 右键行操作菜单 ----------

@@ -25,6 +25,8 @@ export const JOURNAL_SCHEMA = 'edit-journal-v1';
 //   maxBytes      可注入（单测）；默认 MAX_CHARS（序列化 JSON 字符数预算）
 //   audioFeatures (t0, t1) => 音频特征 | null；main.js 由波形峰值派生注入
 //   runId         () => string | null；管线运行 ID（manifest 载入后），进导出 header
+//   scenario      () => string | null；学习场景标签（四场景 D27，js/session-source.js 判定），
+//                    进导出 header（可选字段：无法判定时缺省，旧日志/摄取端均兼容）
 // }
 export function createJournal(store, deps = {}) {
   const storage = deps.storage ?? defaultStorage();
@@ -209,6 +211,8 @@ export function createJournal(store, deps = {}) {
     persistNow();
     if (!queue.events.length) return null;
     const sessions = [...new Set(queue.events.map((e) => e.session_id))];
+    // scenario 为可选字段（D27）：判定不出（null/空）时不写入，保持与旧日志同构
+    const scenario = deps.scenario?.() ?? null;
     const header = {
       schema: JOURNAL_SCHEMA,
       type: 'header',
@@ -216,6 +220,7 @@ export function createJournal(store, deps = {}) {
       exported_at: now(),
       file: { ...queue.file },
       run_id: deps.runId?.() ?? null,
+      ...(scenario ? { scenario } : {}),
       event_count: queue.events.length,
       session_id: sessions[0] ?? null,
       sessions,

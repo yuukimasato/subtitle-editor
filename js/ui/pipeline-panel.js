@@ -222,12 +222,15 @@ export function createPipelinePanel({ store, panels, openMediaFile, openSubtitle
         const text = await res.text();
         const name = `${(current.file?.name ?? 'subtitle').replace(/\.[^.]+$/, '')}_${version}.srt`;
         await openSubtitleFile(new File([text], name, { type: 'text/plain' }));
-        // 载入后按行序标注 manifest 出处（openSubtitleFile 同步重建 cues）
+        // 载入后按行序标注 manifest 出处（openSubtitleFile 同步重建 cues）；
+        // 来源任务无条件记入 pipelineRun（学习请求据此携带 task_id），manifest 缺失只影响出处标注
         if (current.manifest) {
           const matched = annotateProvenance(store.state.cues, current.manifest);
-          store.patch({ pipelineRun: { taskId: current.taskId, runId: current.manifest.run_id ?? null } });
+          // 重新 emit cues 驱动表格增量重绘，说话人列随之显示
+          store.patch({ cues: [...store.state.cues] });
           showToast(`已标注 ${matched} 条 cue 出处`);
         }
+        store.patch({ pipelineRun: { taskId: current.taskId, runId: current.manifest?.run_id ?? null } });
       } catch (err) {
         showToast(`载入字幕失败：${err.message}`, 'error');
       }
@@ -252,7 +255,9 @@ export function createPipelinePanel({ store, panels, openMediaFile, openSubtitle
 
     body.append(statusRow, formRow, fileRow, progress, resultRow, hint);
     refresh();
-    return body;
+    // 内容已直接 append 进 body；不能 return body——resolveContent 会把返回值
+    // appendChild 进 body（自己装自己 → HierarchyRequestError，面板样式应用中断）。
+    return undefined;
   }
 
   function open() {

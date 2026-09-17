@@ -2,6 +2,7 @@
 // 快捷键全部由 shortcuts.js 接管（ArtPlayer 内置热键已关闭）。
 import Artplayer from '../../vendor/artplayer.mjs';
 import { formatClock } from '../format/time.js';
+import { splitSpeaker } from '../format/cue.js';
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const FPSES = [23.976, 24, 25, 29.97, 30];
@@ -295,10 +296,12 @@ export function createPlayer({ store, mountEl, transportEl, onError }) {
     }
   }
 
-  // 文本预览用：ASS 的 {\...} 覆盖标签只对 libass 有意义，纯文本预览中剥离
+  // 文本预览用：ASS 的 {\...} 覆盖标签只对 libass 有意义，纯文本预览中剥离；
+  // 说话人前缀是编辑台的标注约定，同样不属于画面上的字幕内容
   function previewText(cue) {
     const raw = String(cue.text ?? '');
-    return store.state.subtitleFormat === 'ass' ? raw.replace(/\{[^}]*\}/g, '') : raw;
+    const noTags = store.state.subtitleFormat === 'ass' ? raw.replace(/\{[^}]*\}/g, '') : raw;
+    return splitSpeaker(noTags).body;
   }
 
   // ---------- rAF 循环：时间分发 / 试听窗口 / 循环当前句 / 文本预览 ----------

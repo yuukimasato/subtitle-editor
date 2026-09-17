@@ -48,6 +48,24 @@ function cueTextToAssText(s) {
   return String(s ?? '').replace(/\r/g, '').replace(/\n/g, '\\N').replace(/\u2028/g, '\\n');
 }
 
+// 行首连续覆盖标签段（{\c&H..&\pos(..)}台词 → 标签段 + 台词）。
+// 只认行首一整段：句中标签（如逐字卡拉OK）位置与正文耦合，显示层不动它。
+const LEADING_ASS_TAGS_RE = /^(?:\{[^{}]*\})+/;
+
+// 拆出行首覆盖标签段，供表格显示纯文本（cue.text 数据保持原样，导出/渲染不受影响）
+export function splitAssTags(text) {
+  const s = String(text ?? '');
+  const m = LEADING_ASS_TAGS_RE.exec(s);
+  return m ? { tags: m[0], body: s.slice(m[0].length) } : { tags: '', body: s };
+}
+
+// 编辑提交时拼回：正文若自带标签段则原样采用（视为改写标签），否则沿用原标签段
+export function joinAssTags(originalText, editedBody) {
+  const body = String(editedBody ?? '');
+  if (LEADING_ASS_TAGS_RE.test(body)) return body;
+  return splitAssTags(originalText).tags + body;
+}
+
 // 用 cue 的当前时间/文本重写字段值（fields 为字段名数组，返回原数组便于链式）
 function applyCueParts(parts, fields, cue) {
   parts[fields.indexOf('start')] = formatAssTime(cue.start);

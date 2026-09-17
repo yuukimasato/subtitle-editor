@@ -519,11 +519,16 @@ body {
 #cue-table .time { width: 96px; }
 #cue-table .dur { width: 58px; color: var(--text-tertiary); }
 #cue-table .col-style { width: 92px; }
+#cue-table .col-speaker { width: 84px; }
 #cue-table .col-play { width: 40px; }
 
 /* 非 ASS 或无样式表时隐藏整列 */
 .cue-table-wrap.hide-style .col-style,
 .cue-table-wrap.hide-style .style-cell { display: none; }
+
+/* 所有行都没有说话人前缀时隐藏整列 */
+.cue-table-wrap.hide-speaker .col-speaker,
+.cue-table-wrap.hide-speaker .speaker-cell { display: none; }
 
 .edit-style {
   width: 100%;
@@ -543,6 +548,13 @@ body {
 
 #cue-table .num { color: var(--text-tertiary); }
 #cue-table .text-cell { min-width: 120px; }
+#cue-table .speaker-cell {
+  max-width: 84px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .op {
   width: 24px;
@@ -559,6 +571,20 @@ body {
 
 .op:hover { color: var(--text-primary); border-color: var(--border-hover); background: var(--surface-hover); }
 .op.play { color: var(--accent); }
+
+/* 顶栏说话人开关（导出/同步是否携带说话人，默认开） */
+.spk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.spk-toggle:hover { color: var(--text-primary); }
+.spk-toggle input { accent-color: var(--accent); cursor: pointer; }
 
 .edit-time, .edit-text {
   width: 100%;

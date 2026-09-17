@@ -41,6 +41,8 @@ function setup({ journalDeps = {} } = {}) {
     maxEvents: journalDeps.maxEvents,
     maxBytes: journalDeps.maxBytes,
     audioFeatures: journalDeps.audioFeatures ?? null,
+    runId: journalDeps.runId ?? null,
+    scenario: journalDeps.scenario ?? null,
   });
   const actions = createActions(store, { journal });
   return { store, actions, journal, storage };
@@ -260,6 +262,62 @@ test('契约一致性：事件与 header 携带 session_id 必填字段，schema
   // sink 按 header.session_id 路由会话文件；sessions 数组为多会话队列的追加字段
   assert.equal(header.session_id, event.session_id);
   assert.deepEqual(header.sessions, [event.session_id]);
+});
+
+// ---------- 场景标签（四场景 D27，header 可选字段） ----------
+
+test('header 携带 scenario：判定得出时写入，导出与上送（同一 exportText）均含该字段', () => {
+  const { actions, journal } = setup({ journalDeps: { scenario: () => 'inline-review' } });
+  loadFixture(actions);
+  actions.updateCueTimes('a', 1.5, 3);
+  const [header] = parseNdjson(journal.exportText());
+  assert.equal(header.scenario, 'inline-review');
+  assert.ok('scenario' in header);
+});
+
+test('header scenario 为可选：判定不出时字段缺省，与旧日志同构', () => {
+  const { actions, journal } = setup({ journalDeps: { scenario: () => null } });
+  loadFixture(actions);
+  actions.updateCueTimes('a', 1.5, 3);
+  const [header] = parseNdjson(journal.exportText());
+  assert.equal('scenario' in header, false);
+  // 未注入 scenario 依赖（旧装配路径）同样不产生该字段
+  const bare = setup();
+  loadFixture(bare.actions);
+  bare.actions.updateCueTimes('a', 1.5, 3);
+  assert.equal('scenario' in parseNdjson(bare.journal.exportText())[0], false);
+});
+
+test('旧队列（无 scenario 概念的持久化数据）装载不受影响，导出正常且按需补 scenario', () => {
+  const storage = fakeStorage();
+  // 直接写入旧版队列 JSON：结构与 edit-journal-v1 现存字段一致，无任何 scenario 痕迹
+  storage.setItem(
+    'vstEditor.journal.x.srt',
+    JSON.stringify({
+      version: 1,
+      file: { subtitle: 'x.srt', media: '' },
+      overflow: false,
+      events: [{
+        schema: JOURNAL_SCHEMA,
+        type: 'event',
+        session_id: 's-old',
+        seq: 0,
+        ts: '2026-01-01T00:00:00Z',
+        actor: 'human',
+        command: 'updateCueTimes',
+        coalesce_key: null,
+        targets: ['a'],
+        diff: [{ op: 'modify', id: 'a', changes: [{ field: 'start', before: 1, after: 1.5 }] }],
+        context: { cue: null, audio: null, provenance: null },
+      }],
+    }),
+  );
+  const { actions, journal } = setup({ journalDeps: { storage, scenario: () => 'existing-subtitle' } });
+  loadFixture(actions); // x.srt 命中旧队列
+  assert.equal(journal.stats().events, 1); // 装载无报错，事件完整
+  const [header, event] = parseNdjson(journal.exportText());
+  assert.equal(event.session_id, 's-old'); // 旧事件原样导出（上送对缺失字段宽容）
+  assert.equal(header.scenario, 'existing-subtitle'); // scenario 在导出时按当前会话补齐
 });
 
 // ---------- 重放还原（验收：原始字幕 + 日志 = 最终字幕） ----------

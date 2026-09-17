@@ -22,11 +22,17 @@ export function createPanelLayer(store, deps = {}) {
   function resolveContent(panel, body) {
     body.textContent = '';
     const content = panel.content;
-    if (typeof content === 'function') {
-      const node = content(body);
-      if (node) body.appendChild(node);
-    } else if (content) {
-      body.appendChild(content);
+    try {
+      if (typeof content === 'function') {
+        const node = content(body);
+        // 渲染函数可能自己 append 完再误把 body 返回；append 回 body 等于自己装自己
+        if (node && node !== body) body.appendChild(node);
+      } else if (content) {
+        body.appendChild(content);
+      }
+    } catch (err) {
+      // 渲染失败只降级该面板（保留已输出内容），不能炸掉 syncAll 中断样式应用
+      console.error(`[panel:${panel.id}] 渲染失败:`, err);
     }
   }
 

@@ -17,6 +17,7 @@ export function createStore() {
     mediaName: '',
     subtitleName: '',
     subtitleFormat: '',
+    subtitleSource: null, // 'file'=字幕来自打开的文件（会话来源判定用，见 session-source.js）
     subDoc: null,
     dirty: false,
     savedAt: 0, // 最近一次草稿自动保存时间戳
